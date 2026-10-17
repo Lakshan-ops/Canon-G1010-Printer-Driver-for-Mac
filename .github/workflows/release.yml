@@ -1,0 +1,72 @@
+# Builds the macOS .pkg on a GitHub-hosted Apple silicon Mac.
+# - Run it manually (Actions tab → "Build macOS package" → Run workflow) to get
+#   the .pkg as a downloadable build artifact.
+# - Push a tag like v5.3.5-1 to also publish a GitHub Release with the .pkg,
+#   the Gutenprint source archive (GPL corresponding source) and SHA256SUMS.txt.
+name: Build macOS package
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  build:
+    runs-on: macos-15          # Apple silicon (arm64)
+    timeout-minutes: 45
+    permissions:
+      contents: write          # needed only to publish the release on tags
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build, test and package
+        env:
+          G1010_WORKDIR: ${{ runner.temp }}/g1010-build
+        run: |
+          sw_vers
+          chmod +x build-g1010-mac-driver.sh
+          ./build-g1010-mac-driver.sh package
+
+      - name: Collect release files
+        env:
+          G1010_WORKDIR: ${{ runner.temp }}/g1010-build
+        run: |
+          mkdir -p dist
+          mv Canon-G1010-Driver-*.pkg dist/
+          cp "$G1010_WORKDIR/gutenprint-5.3.5.tar.xz" dist/
+          # The source archive must still match the pinned upstream checksum.
+          echo "f5a9f47de28530b1ae2069cfbc647a9a641baeeabe809bb0ef2b3ec5b9668d70  dist/gutenprint-5.3.5.tar.xz" | shasum -a 256 -c -
+          ( cd dist && shasum -a 256 * > SHA256SUMS.txt && cat SHA256SUMS.txt )
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: g1010-mac-driver
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed "s#OWNER_REPO#${GITHUB_REPOSITORY}#g" RELEASE_NOTES.md > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Canon G1010 driver for macOS ($GITHUB_REF_NAME)" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag

@@ -1,0 +1,13 @@
+# Canon's own driver installers are Canon's copyrighted software: never commit them
+*.exe
+*.msi
+
+# Build outputs (published via GitHub Releases, not committed)
+*.pkg
+*.tar.xz
+g1010-driver-build/
+dist/
+
+# macOS clutter
+.DS_Store
+._*
